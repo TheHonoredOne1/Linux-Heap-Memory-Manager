@@ -78,7 +78,7 @@ void mm_instantiate_new_page_family(char *struct_name, __uint32_t struct_size)
     }
     ITERATE_PAGE_FAMILIES_END(first_vm_page_for_families, curr_family_iterator);
 
-    if (count_of_families_in_vm_page == MAX_FAMILIES_PER_VM_PAGE)// we need a new page.
+    if (count_of_families_in_vm_page == MAX_FAMILIES_PER_VM_PAGE) // we need a new page.
     {
         vm_page_for_families_t *new_page = (vm_page_for_families_t *)get_new_vm_page_from_kernel(1);
         new_page->next = first_vm_page_for_families;
@@ -91,21 +91,52 @@ void mm_instantiate_new_page_family(char *struct_name, __uint32_t struct_size)
     return;
 }
 
-int main()
+void mm_print_registered_page_families()
 {
-
-    mm_initializer();
-    printf("The size of the page on my system : %zu\n", SYSTEM_PAGE_SIZE);
-
-    void *p1Add = get_new_vm_page_from_kernel(1);
-    void *p2Add = get_new_vm_page_from_kernel(1);
-
-    printf("Address of Page_1 : %p\nAddress of Page_2 : %p\n", p1Add, p2Add);
-    // printf("%d -------\n", (p1Add - p2Add));
-    // if((p1Add - p2Add)%SYSTEM_PAGE_SIZE == 0){
-    //     printf("Yes\n");
-    // }
-    return_vm_page_to_kernel(p1Add, 1);
-    return_vm_page_to_kernel(p2Add, 1);
-    return 0;
+    vm_page_for_families_t *traversing_page = first_vm_page_for_families;
+    while (traversing_page)
+    {
+        // page_family_t *curr_family = &traversing_page->page_family[0];
+        page_family_t *curr_family = NULL;
+        ITERATE_PAGE_FAMILIES_BEGIN(traversing_page, curr_family)
+        {
+            printf("Page_Family : %s | Family_Size : %u\n", curr_family->struct_name, curr_family->struct_size);
+        }
+        ITERATE_PAGE_FAMILIES_END(traversing_page, curr_family);
+        traversing_page = traversing_page->next;
+    }
 }
+
+page_family_t* lookup_page_family_by_name(char * family_name)
+{
+    vm_page_for_families_t * traversing_page = first_vm_page_for_families;
+    while(traversing_page)
+    {
+        page_family_t* curr_family = NULL;
+        ITERATE_PAGE_FAMILIES_BEGIN(traversing_page, curr_family)
+        {
+            if(strncmp(curr_family->struct_name, family_name, MM_MAX_STRUCTNAME_SIZE) == 0){
+                return curr_family;
+            }
+        }
+        ITERATE_PAGE_FAMILIES_END(traversing_page, curr_family);
+        traversing_page = traversing_page->next;
+    }
+    return NULL;
+}
+
+// int main()
+// {
+//     mm_initializer();
+//     printf("The size of the page on my system : %zu\n", SYSTEM_PAGE_SIZE);
+//     void *p1Add = get_new_vm_page_from_kernel(1);
+//     void *p2Add = get_new_vm_page_from_kernel(1);
+//     printf("Address of Page_1 : %p\nAddress of Page_2 : %p\n", p1Add, p2Add);
+//     // printf("%d -------\n", (p1Add - p2Add));
+//     // if((p1Add - p2Add)%SYSTEM_PAGE_SIZE == 0){
+//     //     printf("Yes\n");
+//     // }
+//     return_vm_page_to_kernel(p1Add, 1);
+//     return_vm_page_to_kernel(p2Add, 1);
+//     return 0;
+// }

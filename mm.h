@@ -32,5 +32,9 @@ void* start_address = &(vm_page_for_families_ptr -> page_family[0]);
      _count++, curr_family_iterator++)                                                         
     {
 */
-
 #define ITERATE_PAGE_FAMILIES_END(vm_page_for_families_ptr, curr_family_iterator) }}
+
+
+page_family_t* lookup_page_family_by_name(char * family_name);
+
+

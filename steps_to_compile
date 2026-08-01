@@ -1,0 +1,3 @@
+1] gcc -g -c mm.c -o mm.o
+2] gcc -g -c testApp.c -o testApp.o
+3] gcc -g mm.o testApp.o -o exe
