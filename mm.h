@@ -86,6 +86,8 @@ struct vm_page_{
         PREV_META_BLOCK(free_meta_block) = allocated_meta_block;             \
     } while(0)
 
+void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second);
+
 
 
 // TEMP - Q6 counters, move into calling function later

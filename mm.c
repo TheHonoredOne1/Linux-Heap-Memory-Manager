@@ -125,6 +125,19 @@ page_family_t* lookup_page_family_by_name(char * family_name)
     return NULL;
 }
 
+// merges 'second' into 'first' when both are free and physically adjacent (first->next_block == second)
+void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second)
+{
+    assert(first->is_free == MM_TRUE && second->is_free == MM_TRUE);
+
+    first->next_block = second->next_block;
+    if (second->next_block)
+    {
+        second->next_block->previous_block = first;
+    }
+    first->data_block_size += second->data_block_size + sizeof(block_meta_data_t);
+}
+
 // int main()
 // {
 //     mm_initializer();
