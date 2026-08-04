@@ -46,7 +46,7 @@ typedef struct block_meta_data_  block_meta_data_t;
 struct block_meta_data_{
     vm_bool_t is_free;
     __uint32_t data_block_size;
-    __uint32_t offset;
+    __uint32_t offset; // distance from the page start
     block_meta_data_t* previous_block;
     block_meta_data_t* next_block;
 };
@@ -56,6 +56,7 @@ struct vm_page_{
     vm_page_t * next;
     vm_page_t * prev;
 };
+
 
 #define OFFSET_OF(structure_type, field_name)\
     ((size_t)&(((structure_type*)0)->field_name))
@@ -71,4 +72,62 @@ struct vm_page_{
 
 #define NEXT_META_BLOCK_BY_SIZE(block_meta_data_ptr)\
     ((void*)((char*)block_meta_data_ptr + (sizeof(block_meta_data_t) + (block_meta_data_ptr->data_block_size))))
-    
+
+
+
+// block splitting and merging 
+#define MM_BIND_BLOCKS_FOR_ALLOCATION(allocated_meta_block, free_meta_block) \
+    do {                                                                     \
+        NEXT_META_BLOCK(free_meta_block) = NEXT_META_BLOCK(allocated_meta_block); \
+        if(NEXT_META_BLOCK(allocated_meta_block) != NULL) {                  \
+            PREV_META_BLOCK(NEXT_META_BLOCK(allocated_meta_block)) = free_meta_block; \
+        }                                                                     \
+        NEXT_META_BLOCK(allocated_meta_block) = free_meta_block;             \
+        PREV_META_BLOCK(free_meta_block) = allocated_meta_block;             \
+    } while(0)
+
+
+
+// TEMP - Q6 counters, move into calling function later
+block_meta_data_t *largest_free_block   = NULL;
+block_meta_data_t *largest_alloc_block  = NULL;
+__uint32_t free_block_count  = 0;
+__uint32_t alloc_block_count = 0;
+vm_bool_t prev_block_was_free = MM_FALSE;
+
+// iterate vm_pages.
+#define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(first_meta_block, curr){ \
+    block_meta_data_t* curr = first_meta_block;\
+    for( ; curr != NULL ; curr = NEXT_META_BLOCK(curr)) {\
+        if(curr->is_free){                      \
+            if(prev_block_was_free){            \
+                assert(0);                      \
+            }                                   \
+            free_block_count++;                 \
+            if(largest_free_block == NULL){     \
+                largest_free_block = curr;      \
+            }                                   \
+            else{                               \
+                if(curr->data_block_size > largest_free_block->data_block_size) \
+                {                               \
+                    largest_free_block = curr;  \
+                }                               \
+            }                                   \
+            prev_block_was_free = MM_TRUE;      \
+        }                                       \
+        else{                                   \
+            alloc_block_count++;                \
+            if(largest_alloc_block == NULL){    \
+                largest_alloc_block = curr;     \
+            }                                   \
+            else{                               \
+                if(curr->data_block_size > largest_alloc_block->data_block_size) \
+                {                               \
+                    largest_alloc_block = curr; \
+                }                               \
+            }                                   \
+            prev_block_was_free = MM_FALSE;     \
+        }                                       \
+
+#define ITERATE_VM_PAGE_ALL_BLOCKS_END(first_meta_block, curr) }\
+    }\
