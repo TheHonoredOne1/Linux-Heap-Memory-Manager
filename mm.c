@@ -138,6 +138,17 @@ void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second)
     first->data_block_size += second->data_block_size + sizeof(block_meta_data_t);
 }
 
+
+vm_bool_t mm_is_vm_page_empty(vm_page_t * vm_page)
+{
+    if(vm_page->meta_block.is_free == MM_TRUE &&
+        vm_page->meta_block.next_block == NULL &&
+        vm_page->meta_block.previous_block == NULL)
+    {
+        return MM_TRUE;
+    }
+    return MM_FALSE;
+}
 // int main()
 // {
 //     mm_initializer();
