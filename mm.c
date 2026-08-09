@@ -80,9 +80,9 @@ void mm_instantiate_new_page_family(char *struct_name, __uint32_t struct_size)
 
     if (count_of_families_in_vm_page == MAX_FAMILIES_PER_VM_PAGE) // we need a new page.
     {
-        vm_page_for_families_t *new_page = (vm_page_for_families_t *)get_new_vm_page_from_kernel(1);
-        new_page->next = first_vm_page_for_families;
-        first_vm_page_for_families = new_page;
+        vm_page_for_families_t *new_allocated_vm_page = (vm_page_for_families_t *)get_new_vm_page_from_kernel(1);
+        new_allocated_vm_page->next = first_vm_page_for_families;
+        first_vm_page_for_families = new_allocated_vm_page;
         curr_family_iterator = &first_vm_page_for_families->page_family[0];
     }
 
@@ -107,15 +107,16 @@ void mm_print_registered_page_families()
     }
 }
 
-page_family_t* lookup_page_family_by_name(char * family_name)
+page_family_t *lookup_page_family_by_name(char *family_name)
 {
-    vm_page_for_families_t * traversing_page = first_vm_page_for_families;
-    while(traversing_page)
+    vm_page_for_families_t *traversing_page = first_vm_page_for_families;
+    while (traversing_page)
     {
-        page_family_t* curr_family = NULL;
+        page_family_t *curr_family = NULL;
         ITERATE_PAGE_FAMILIES_BEGIN(traversing_page, curr_family)
         {
-            if(strncmp(curr_family->struct_name, family_name, MM_MAX_STRUCTNAME_SIZE) == 0){
+            if (strncmp(curr_family->struct_name, family_name, MM_MAX_STRUCTNAME_SIZE) == 0)
+            {
                 return curr_family;
             }
         }
@@ -138,16 +139,69 @@ void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second)
     first->data_block_size += second->data_block_size + sizeof(block_meta_data_t);
 }
 
-
-vm_bool_t mm_is_vm_page_empty(vm_page_t * vm_page)
+vm_bool_t mm_is_vm_page_empty(vm_page_t *vm_page)
 {
-    if(vm_page->meta_block.is_free == MM_TRUE &&
+    if (vm_page->meta_block.is_free == MM_TRUE &&
         vm_page->meta_block.next_block == NULL &&
         vm_page->meta_block.previous_block == NULL)
     {
         return MM_TRUE;
     }
     return MM_FALSE;
+}
+
+static __uint32_t mm_max_page_allocatable_memory(int units)
+{
+    // __uint32_t memory_available = (units*SYSTEM_PAGE_SIZE) - (sizeof(vm_page_t)); -- this too works
+    __uint32_t memory_available = (units * SYSTEM_PAGE_SIZE) - OFFSET_OF(vm_page_t, page_memory);
+    return memory_available;
+}
+
+vm_page_t *allocate_vm_page(page_family_t *page_family)
+{
+    vm_page_t *new_allocated_vm_page = (vm_page_t *)get_new_vm_page_from_kernel(1);
+    new_allocated_vm_page->pg_family = page_family;
+    MARK_VM_PAGE_EMPTY(new_allocated_vm_page);
+    new_allocated_vm_page->next = page_family->first_page;
+    if(page_family->first_page != NULL)
+        page_family->first_page->prev = new_allocated_vm_page;
+
+    page_family->first_page = new_allocated_vm_page;
+    new_allocated_vm_page->prev = NULL;
+
+    new_allocated_vm_page->meta_block.offset = OFFSET_OF(vm_page_t, meta_block);
+    new_allocated_vm_page->meta_block.data_block_size = mm_max_page_allocatable_memory(1);
+
+    return new_allocated_vm_page;
+}
+
+void mm_vm_page_delete_and_free(vm_page_t* vm_page)
+{
+    page_family_t* family = vm_page->pg_family;
+    //  deletion of the head.
+    if(vm_page->prev == NULL){
+        family->first_page = vm_page->next;
+        if(vm_page->next != NULL)
+            vm_page->next->prev = NULL;
+        vm_page->next = NULL;
+        vm_page->pg_family = NULL;
+    }
+    else
+    {
+        if(vm_page->next == NULL)
+        {
+            vm_page->prev->next = NULL;
+            vm_page->prev = NULL;
+        }
+        else
+        {
+            vm_page->prev->next = vm_page->next;
+            vm_page->next->prev = vm_page->prev;
+            vm_page ->next = NULL;
+            vm_page ->prev = NULL;
+        }
+    }
+    return_vm_page_to_kernel(vm_page, 1);
 }
 // int main()
 // {

@@ -105,9 +105,11 @@ __uint32_t alloc_block_count = 0;
 vm_bool_t prev_block_was_free = MM_FALSE;
 
 // iterate vm_pages.
-#define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(first_meta_block, curr){ \
-    block_meta_data_t* curr = first_meta_block;\
-    for( ; curr != NULL ; curr = NEXT_META_BLOCK(curr)) {\
+#define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page_ptr, curr){ \
+    block_meta_data_t* curr = &(vm_page_ptr->meta_block);\
+    block_meta_data_t* next ;                   \
+    for( ; curr != NULL ; curr = next){         \
+        next = NEXT_META_BLOCK(curr);           \
         if(curr->is_free){                      \
             if(prev_block_was_free){            \
                 assert(0);                      \
@@ -138,12 +140,12 @@ vm_bool_t prev_block_was_free = MM_FALSE;
             prev_block_was_free = MM_FALSE;     \
         }                                       \
 
-#define ITERATE_VM_PAGE_ALL_BLOCKS_END(first_meta_block, curr) }\
+#define ITERATE_VM_PAGE_ALL_BLOCKS_END(vm_page_ptr, curr) }\
     }\
 
 
-vm_bool_t mm_is_vm_page_empty(vm_page_t * vm_page);
 
+vm_bool_t mm_is_vm_page_empty(vm_page_t * vm_page);
 
 // it is given that the vm_page is empty, and has no data block present.
 #define MARK_VM_PAGE_EMPTY(vm_page_ptr) \
@@ -153,3 +155,16 @@ vm_bool_t mm_is_vm_page_empty(vm_page_t * vm_page);
     (vm_page_ptr -> meta_block.previous_block = NULL);\
     }while(0)\
 
+
+
+#define ITERATE_VM_PAGE_BEGIN(page_family_ptr, page_iterator){  \
+    vm_page_t* next;                                             \
+    for(page_iterator = page_family_ptr->first_page; page_iterator != NULL ; page_iterator = next){\
+    next = page_iterator->next;                                  \
+
+#define ITERATE_VM_PAGE_END(page_family_ptr, page_iterator)} \
+}\
+
+vm_page_t *allocate_vm_page(page_family_t *page_family);
+
+void mm_vm_page_delete_and_free(vm_page_t *vm_page);
