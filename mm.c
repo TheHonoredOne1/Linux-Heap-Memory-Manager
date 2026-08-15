@@ -63,6 +63,8 @@ void mm_instantiate_new_page_family(char *struct_name, __uint32_t struct_size)
         first_vm_page_for_families->next = NULL;
         strncpy(first_vm_page_for_families->page_family[0].struct_name, struct_name, MM_MAX_STRUCTNAME_SIZE);
         first_vm_page_for_families->page_family[0].struct_size = struct_size;
+        init_glthread(&first_vm_page_for_families->page_family[0].free_block_pq_list_head);
+        // initializing the head of the doubly linked list priority queue.
         return;
     }
 
@@ -88,6 +90,7 @@ void mm_instantiate_new_page_family(char *struct_name, __uint32_t struct_size)
 
     curr_family_iterator->struct_size = struct_size;
     strncpy(curr_family_iterator->struct_name, struct_name, MM_MAX_STRUCTNAME_SIZE);
+    init_glthread(&curr_family_iterator->free_block_pq_list_head);
     return;
 }
 
@@ -161,6 +164,7 @@ vm_page_t *allocate_vm_page(page_family_t *page_family)
 {
     vm_page_t *new_allocated_vm_page = (vm_page_t *)get_new_vm_page_from_kernel(1);
     new_allocated_vm_page->pg_family = page_family;
+    init_glthread(&new_allocated_vm_page->meta_block.free_block_pq_list_glue);
     MARK_VM_PAGE_EMPTY(new_allocated_vm_page);
     new_allocated_vm_page->next = page_family->first_page;
     if(page_family->first_page != NULL)
@@ -202,6 +206,25 @@ void mm_vm_page_delete_and_free(vm_page_t* vm_page)
         }
     }
     return_vm_page_to_kernel(vm_page, 1);
+}
+
+static int free_blocks_comparison_function(void* Block_1, void* Block_2)
+{
+    block_meta_data_t* freeBlock_1 = (block_meta_data_t*)Block_1;
+    block_meta_data_t* freeBlock_2 = (block_meta_data_t*)Block_2;
+
+    if(freeBlock_1 ->data_block_size > freeBlock_2->data_block_size)
+        return -1;
+    else if(freeBlock_2 ->data_block_size > freeBlock_1->data_block_size)
+        return 1;
+    else
+        return 0;
+}
+
+void mm_add_free_block_meta_data_to_free_block_list(page_family_t* family, block_meta_data_t* free_meta_block)
+{
+    assert(free_meta_block->is_free);
+    glthread_priority_insert(&family->free_block_pq_list_head, &free_meta_block->free_block_pq_list_glue, free_blocks_comparison_function, OFFSET_OF(block_meta_data_t, free_block_pq_list_glue));
 }
 // int main()
 // {
