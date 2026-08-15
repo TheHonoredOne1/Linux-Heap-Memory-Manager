@@ -110,12 +110,7 @@ page_family_t *lookup_page_family_by_name(char *family_name);
 
 void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second);
 
-// TEMP - Q6 counters, move into calling function later
-block_meta_data_t *largest_free_block = NULL;
-block_meta_data_t *largest_alloc_block = NULL;
-__uint32_t free_block_count = 0;
-__uint32_t alloc_block_count = 0;
-vm_bool_t prev_block_was_free = MM_FALSE;
+
 
 // iterate vm_pages.
 #define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page_ptr, curr)                           \

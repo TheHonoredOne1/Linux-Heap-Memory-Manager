@@ -163,11 +163,14 @@ static __uint32_t mm_max_page_allocatable_memory(int units)
 vm_page_t *allocate_vm_page(page_family_t *page_family)
 {
     vm_page_t *new_allocated_vm_page = (vm_page_t *)get_new_vm_page_from_kernel(1);
+    if(new_allocated_vm_page == NULL){
+        return NULL;
+    }
     new_allocated_vm_page->pg_family = page_family;
     init_glthread(&new_allocated_vm_page->meta_block.free_block_pq_list_glue);
     MARK_VM_PAGE_EMPTY(new_allocated_vm_page);
     new_allocated_vm_page->next = page_family->first_page;
-    if(page_family->first_page != NULL)
+    if (page_family->first_page != NULL)
         page_family->first_page->prev = new_allocated_vm_page;
 
     page_family->first_page = new_allocated_vm_page;
@@ -179,20 +182,21 @@ vm_page_t *allocate_vm_page(page_family_t *page_family)
     return new_allocated_vm_page;
 }
 
-void mm_vm_page_delete_and_free(vm_page_t* vm_page)
+void mm_vm_page_delete_and_free(vm_page_t *vm_page)
 {
-    page_family_t* family = vm_page->pg_family;
+    page_family_t *family = vm_page->pg_family;
     //  deletion of the head.
-    if(vm_page->prev == NULL){
+    if (vm_page->prev == NULL)
+    {
         family->first_page = vm_page->next;
-        if(vm_page->next != NULL)
+        if (vm_page->next != NULL)
             vm_page->next->prev = NULL;
         vm_page->next = NULL;
         vm_page->pg_family = NULL;
     }
     else
     {
-        if(vm_page->next == NULL)
+        if (vm_page->next == NULL)
         {
             vm_page->prev->next = NULL;
             vm_page->prev = NULL;
@@ -201,31 +205,152 @@ void mm_vm_page_delete_and_free(vm_page_t* vm_page)
         {
             vm_page->prev->next = vm_page->next;
             vm_page->next->prev = vm_page->prev;
-            vm_page ->next = NULL;
-            vm_page ->prev = NULL;
+            vm_page->next = NULL;
+            vm_page->prev = NULL;
         }
     }
     return_vm_page_to_kernel(vm_page, 1);
 }
 
-static int free_blocks_comparison_function(void* Block_1, void* Block_2)
+static int free_blocks_comparison_function(void *Block_1, void *Block_2)
 {
-    block_meta_data_t* freeBlock_1 = (block_meta_data_t*)Block_1;
-    block_meta_data_t* freeBlock_2 = (block_meta_data_t*)Block_2;
+    block_meta_data_t *freeBlock_1 = (block_meta_data_t *)Block_1;
+    block_meta_data_t *freeBlock_2 = (block_meta_data_t *)Block_2;
 
-    if(freeBlock_1 ->data_block_size > freeBlock_2->data_block_size)
+    if (freeBlock_1->data_block_size > freeBlock_2->data_block_size)
         return -1;
-    else if(freeBlock_2 ->data_block_size > freeBlock_1->data_block_size)
+    else if (freeBlock_2->data_block_size > freeBlock_1->data_block_size)
         return 1;
     else
         return 0;
 }
 
-void mm_add_free_block_meta_data_to_free_block_list(page_family_t* family, block_meta_data_t* free_meta_block)
+void mm_add_free_block_meta_data_to_free_block_list(page_family_t *family, block_meta_data_t *free_meta_block)
 {
     assert(free_meta_block->is_free);
     glthread_priority_insert(&family->free_block_pq_list_head, &free_meta_block->free_block_pq_list_glue, free_blocks_comparison_function, OFFSET_OF(block_meta_data_t, free_block_pq_list_glue));
 }
+
+
+vm_page_t *mm_add_new_page_to_family(page_family_t *pg_family)
+{
+    vm_page_t* newPage = allocate_vm_page(pg_family);
+    if(newPage == NULL){
+        return NULL;
+    }
+    mm_add_free_block_meta_data_to_free_block_list(pg_family, &newPage->meta_block);
+    return newPage;
+}
+
+
+vm_bool_t mm_split_free_data_block_for_allocation(page_family_t* pg_family, block_meta_data_t* freeMetaBlock, __uint32_t requested_size){
+
+    // task-1 -> guards. block must be free, and big enough to serve the request.
+    assert(freeMetaBlock->is_free);
+    if(freeMetaBlock->data_block_size < requested_size)
+        return MM_FALSE;
+
+    // computed before data_block_size is overwritten below, else the original size is lost.
+    __uint32_t remainingSizeAfterAllocation = freeMetaBlock->data_block_size - requested_size;
+    block_meta_data_t* newMetaBlockAfterSplit = NULL;
+
+    // task-2 -> updating our current allocated metaBlock. applies to all 3 cases.
+    // offset is deliberately left alone - the block has not moved within the page.
+    freeMetaBlock->is_free = MM_FALSE;
+    freeMetaBlock->data_block_size = requested_size;
+    remove_glthread(&freeMetaBlock->free_block_pq_list_glue);
+
+    // task-3 -> the two cases that need no further work.
+    // case 1 : no split. block consumed exactly, nothing left over.
+    if (remainingSizeAfterAllocation == 0){
+        return MM_TRUE;
+    }
+    // case 2 : hard internal fragmentation. leftover cannot hold a meta block plus
+    // one whole struct, so it could never serve a future request from this family.
+    // absorbed into the allocated block instead of being tracked. no new block, so
+    // no linkage or priority-queue changes are needed.
+    else if(remainingSizeAfterAllocation < (sizeof(block_meta_data_t) + pg_family->struct_size)){
+        return MM_TRUE;
+    }
+    
+    // case 3 : full split. the residual is guaranteed to hold at least one whole
+    // struct, because anything smaller was already caught by the hard-IF check above.
+    // note: the course's looser threshold (remaining < sizeof(block_meta_data_t)) also
+    // admits "soft internal fragmentation" here - a residual block with 0 usable bytes.
+    // the threshold used above rules that out entirely, so only full splits reach here.
+
+    // task-4 -> creating new meta block and filling its fields.
+    // relies on data_block_size already being requested_size, so the macro lands
+    // just past the allocated data.
+    newMetaBlockAfterSplit = NEXT_META_BLOCK_BY_SIZE(freeMetaBlock);
+    newMetaBlockAfterSplit->is_free = MM_TRUE;
+    newMetaBlockAfterSplit->data_block_size = remainingSizeAfterAllocation - sizeof(block_meta_data_t);
+    newMetaBlockAfterSplit->offset = freeMetaBlock->offset + sizeof(block_meta_data_t) + requested_size;
+
+    // task-5 -> publishing the new block. stitch it into the P/N chain, then make it
+    // visible to the allocator by inserting it into the family's free block list.
+    init_glthread(&newMetaBlockAfterSplit->free_block_pq_list_glue);
+    MM_BIND_BLOCKS_FOR_ALLOCATION(freeMetaBlock, newMetaBlockAfterSplit);
+    mm_add_free_block_meta_data_to_free_block_list(pg_family, newMetaBlockAfterSplit);
+    return MM_TRUE;
+}
+
+block_meta_data_t *mm_allocate_free_data_block(page_family_t *pg_family, __uint32_t requested_size)
+{
+    vm_bool_t status = MM_FALSE;
+    vm_page_t *new_page = NULL;
+
+    block_meta_data_t *biggestFreeBlock = mm_get_biggest_free_block_page_family(pg_family);
+    if (biggestFreeBlock == NULL || biggestFreeBlock->data_block_size < requested_size)
+    {
+        // New Page
+        new_page = mm_add_new_page_to_family(pg_family);
+        if(!new_page)
+            return NULL;
+            
+        status = mm_split_free_data_block_for_allocation(pg_family, &new_page->meta_block, requested_size);
+        if (status)
+        {
+            return &new_page->meta_block;
+        }
+        return NULL;
+    }
+    status = mm_split_free_data_block_for_allocation(pg_family, biggestFreeBlock, requested_size);
+    if(status)
+        return biggestFreeBlock;
+
+    return NULL;
+}
+
+void *xcalloc(char *struct_name, int units)
+{
+    page_family_t *pg_family = lookup_page_family_by_name(struct_name);
+    if (pg_family == NULL)
+    {
+        printf("Error : Structure %s not registered with Memory Manager, so I can't allocate memory.\n", struct_name);
+        return NULL;
+    }
+    __uint64_t requested_size = (__uint64_t)units * pg_family->struct_size;
+
+    if (requested_size > mm_max_page_allocatable_memory(1))
+    {
+        printf("Error : Memory requested exceeds page size\n");
+        return NULL;
+    }
+
+    block_meta_data_t *allocatedMetaBlock =
+        mm_allocate_free_data_block(pg_family, (__uint32_t)requested_size);
+
+    if (allocatedMetaBlock)
+    {
+        memset((char *)(allocatedMetaBlock + 1), 0, allocatedMetaBlock->data_block_size);
+        return (void *)(allocatedMetaBlock + 1);
+    }
+
+    // could not allocate, so allocatedMetaBlock = NULL
+    return NULL;
+}
+
 // int main()
 // {
 //     mm_initializer();
