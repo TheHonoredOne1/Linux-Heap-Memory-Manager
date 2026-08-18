@@ -15,4 +15,13 @@ void mm_print_registered_page_families();
 #define MM_REG_STRUCT(struct_name)\
 (mm_instantiate_new_page_family(#struct_name, sizeof(struct_name)))
 
+void * xcalloc(char* struct_name, int units);
+#define XCALLOC(units, struct_name)(xcalloc(#struct_name, units))
+
+/* printing / diagnostics */
+void mm_print_memory_usage(char *struct_name);
+void mm_print_block_usage();
+
+
+
 #endif 

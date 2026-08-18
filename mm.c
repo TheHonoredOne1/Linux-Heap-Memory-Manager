@@ -351,6 +351,128 @@ void *xcalloc(char *struct_name, int units)
     return NULL;
 }
 
+/* --- printing / diagnostics (S9) --------------------------------------- */
+
+// dumps every meta block of a single page, in physical order.
+void mm_print_vm_page_details(vm_page_t *vm_page)
+{
+    printf("\t next = %p, prev = %p\n", (void *)vm_page->next, (void *)vm_page->prev);
+    printf("\t page family = %s\n", vm_page->pg_family->struct_name);
+
+    __uint32_t j = 0;
+    ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page, curr)
+    {
+        printf("\t\t%-14p Block %-3u %s  data_block_size = %-6u  offset = %-6u  prev = %-14p  next = %p\n",
+               (void *)curr,
+               j++,
+               curr->is_free ? "F R E E D" : "ALLOCATED",
+               curr->data_block_size,
+               curr->offset,
+               (void *)curr->previous_block,
+               (void *)curr->next_block);
+    }
+    ITERATE_VM_PAGE_ALL_BLOCKS_END(vm_page, curr);
+}
+
+// per family : every page, and every block within it.
+// pass NULL to dump all families.
+void mm_print_memory_usage(char *struct_name)
+{
+    __uint32_t page_count = 0;
+    vm_page_t *vm_page_curr = NULL;
+    page_family_t *curr_family = NULL;
+    vm_page_for_families_t *traversing_page = first_vm_page_for_families;
+
+    printf("\nPage Size = %zu Bytes\n", SYSTEM_PAGE_SIZE);
+
+    while (traversing_page)
+    {
+        ITERATE_PAGE_FAMILIES_BEGIN(traversing_page, curr_family)
+        {
+            if (struct_name &&
+                strncmp(struct_name, curr_family->struct_name, MM_MAX_STRUCTNAME_SIZE) != 0)
+            {
+                continue;
+            }
+
+            printf("\nvm_page_family : %s, struct size = %u\n",
+                   curr_family->struct_name, curr_family->struct_size);
+
+            ITERATE_VM_PAGE_BEGIN(curr_family, vm_page_curr)
+            {
+                page_count++;
+                printf("\n\tPage Index : %u , address = %p\n", page_count - 1, (void *)vm_page_curr);
+                mm_print_vm_page_details(vm_page_curr);
+            }
+            ITERATE_VM_PAGE_END(curr_family, vm_page_curr);
+        }
+        ITERATE_PAGE_FAMILIES_END(traversing_page, curr_family);
+        traversing_page = traversing_page->next;
+    }
+
+    printf("\n# Of VM Pages in Use : %u (%zu Bytes)\n",
+           page_count, page_count * SYSTEM_PAGE_SIZE);
+}
+
+// per family summary : total / free / occupied block counts, plus app memory usage.
+// this is the Q6 audit that used to live inside ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN.
+void mm_print_block_usage()
+{
+    vm_page_t *vm_page_curr = NULL;
+    page_family_t *curr_family = NULL;
+    vm_page_for_families_t *traversing_page = first_vm_page_for_families;
+
+    printf("\n");
+    while (traversing_page)
+    {
+        ITERATE_PAGE_FAMILIES_BEGIN(traversing_page, curr_family)
+        {
+            __uint32_t total_block_count = 0;
+            __uint32_t free_block_count = 0;
+            __uint32_t occupied_block_count = 0;
+            __uint32_t application_memory_usage = 0;
+
+            ITERATE_VM_PAGE_BEGIN(curr_family, vm_page_curr)
+            {
+                ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page_curr, curr)
+                {
+                    total_block_count++;
+
+                    /* sanity : an allocated block must be out of the PQ,
+                     * a free block must be in it. */
+                    if (curr->is_free == MM_FALSE)
+                    {
+                        assert(IS_GLTHREAD_LIST_EMPTY(&curr->free_block_pq_list_glue));
+                        occupied_block_count++;
+                        application_memory_usage +=
+                            curr->data_block_size + sizeof(block_meta_data_t);
+                    }
+                    else
+                    {
+                        assert(!IS_GLTHREAD_LIST_EMPTY(&curr->free_block_pq_list_glue));
+                        free_block_count++;
+                    }
+                }
+                ITERATE_VM_PAGE_ALL_BLOCKS_END(vm_page_curr, curr);
+            }
+            ITERATE_VM_PAGE_END(curr_family, vm_page_curr);
+
+            printf("%-20s   TBC : %-4u    FBC : %-4u    OBC : %-4u    AppMemUsage : %u\n",
+                   curr_family->struct_name, total_block_count,
+                   free_block_count, occupied_block_count, application_memory_usage);
+        }
+        ITERATE_PAGE_FAMILIES_END(traversing_page, curr_family);
+        traversing_page = traversing_page->next;
+    }
+}
+
+
+static int getHardInternalFragmentedMemSize(block_meta_data_t *first, block_meta_data_t* second){
+    // return ((unsigned long)second - (unsigned long)first - first->data_block_size - sizeof(block_meta_data_t));
+    block_meta_data_t* nextBlockBySize = NEXT_META_BLOCK_BY_SIZE(first);
+    return (int)((unsigned long)second - (unsigned long)nextBlockBySize);
+}
+
 // int main()
 // {
 //     mm_initializer();

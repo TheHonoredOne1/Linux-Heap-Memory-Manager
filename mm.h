@@ -44,7 +44,7 @@ struct vm_page_
 {
     vm_page_t *next;
     vm_page_t *prev;
-    page_family_t *pg_family;
+    page_family_t *pg_family;// each V-data page has a back pointer to family.
     block_meta_data_t meta_block;
     char page_memory[0];
 };
@@ -112,50 +112,16 @@ void mm_union_free_blocks(block_meta_data_t *first, block_meta_data_t *second);
 
 
 
-// iterate vm_pages.
-#define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page_ptr, curr)                           \
-    {                                                                                 \
-        block_meta_data_t *curr = &(vm_page_ptr->meta_block);                         \
-        block_meta_data_t *next;                                                      \
-        for (; curr != NULL; curr = next)                                             \
-        {                                                                             \
-            next = NEXT_META_BLOCK(curr);                                             \
-            if (curr->is_free)                                                        \
-            {                                                                         \
-                if (prev_block_was_free)                                              \
-                {                                                                     \
-                    assert(0);                                                        \
-                }                                                                     \
-                free_block_count++;                                                   \
-                if (largest_free_block == NULL)                                       \
-                {                                                                     \
-                    largest_free_block = curr;                                        \
-                }                                                                     \
-                else                                                                  \
-                {                                                                     \
-                    if (curr->data_block_size > largest_free_block->data_block_size)  \
-                    {                                                                 \
-                        largest_free_block = curr;                                    \
-                    }                                                                 \
-                }                                                                     \
-                prev_block_was_free = MM_TRUE;                                        \
-            }                                                                         \
-            else                                                                      \
-            {                                                                         \
-                alloc_block_count++;                                                  \
-                if (largest_alloc_block == NULL)                                      \
-                {                                                                     \
-                    largest_alloc_block = curr;                                       \
-                }                                                                     \
-                else                                                                  \
-                {                                                                     \
-                    if (curr->data_block_size > largest_alloc_block->data_block_size) \
-                    {                                                                 \
-                        largest_alloc_block = curr;                                   \
-                    }                                                                 \
-                }                                                                     \
-                prev_block_was_free = MM_FALSE;                                       \
-            }
+// iterate all meta blocks of a single vm page.
+// the Q6 free/allocated auditing that used to live in this macro body has moved
+// into mm_print_block_usage(), where the counters can be function-locals.
+#define ITERATE_VM_PAGE_ALL_BLOCKS_BEGIN(vm_page_ptr, curr)    \
+    {                                                          \
+        block_meta_data_t *curr = &(vm_page_ptr->meta_block);  \
+        block_meta_data_t *next;                               \
+        for (; curr != NULL; curr = next)                      \
+        {                                                      \
+            next = NEXT_META_BLOCK(curr);
 
 #define ITERATE_VM_PAGE_ALL_BLOCKS_END(vm_page_ptr, curr) \
     }                                                     \
