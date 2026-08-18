@@ -163,7 +163,8 @@ static __uint32_t mm_max_page_allocatable_memory(int units)
 vm_page_t *allocate_vm_page(page_family_t *page_family)
 {
     vm_page_t *new_allocated_vm_page = (vm_page_t *)get_new_vm_page_from_kernel(1);
-    if(new_allocated_vm_page == NULL){
+    if (new_allocated_vm_page == NULL)
+    {
         return NULL;
     }
     new_allocated_vm_page->pg_family = page_family;
@@ -231,28 +232,28 @@ void mm_add_free_block_meta_data_to_free_block_list(page_family_t *family, block
     glthread_priority_insert(&family->free_block_pq_list_head, &free_meta_block->free_block_pq_list_glue, free_blocks_comparison_function, OFFSET_OF(block_meta_data_t, free_block_pq_list_glue));
 }
 
-
 vm_page_t *mm_add_new_page_to_family(page_family_t *pg_family)
 {
-    vm_page_t* newPage = allocate_vm_page(pg_family);
-    if(newPage == NULL){
+    vm_page_t *newPage = allocate_vm_page(pg_family);
+    if (newPage == NULL)
+    {
         return NULL;
     }
     mm_add_free_block_meta_data_to_free_block_list(pg_family, &newPage->meta_block);
     return newPage;
 }
 
-
-vm_bool_t mm_split_free_data_block_for_allocation(page_family_t* pg_family, block_meta_data_t* freeMetaBlock, __uint32_t requested_size){
+vm_bool_t mm_split_free_data_block_for_allocation(page_family_t *pg_family, block_meta_data_t *freeMetaBlock, __uint32_t requested_size)
+{
 
     // task-1 -> guards. block must be free, and big enough to serve the request.
     assert(freeMetaBlock->is_free);
-    if(freeMetaBlock->data_block_size < requested_size)
+    if (freeMetaBlock->data_block_size < requested_size)
         return MM_FALSE;
 
     // computed before data_block_size is overwritten below, else the original size is lost.
     __uint32_t remainingSizeAfterAllocation = freeMetaBlock->data_block_size - requested_size;
-    block_meta_data_t* newMetaBlockAfterSplit = NULL;
+    block_meta_data_t *newMetaBlockAfterSplit = NULL;
 
     // task-2 -> updating our current allocated metaBlock. applies to all 3 cases.
     // offset is deliberately left alone - the block has not moved within the page.
@@ -262,17 +263,19 @@ vm_bool_t mm_split_free_data_block_for_allocation(page_family_t* pg_family, bloc
 
     // task-3 -> the two cases that need no further work.
     // case 1 : no split. block consumed exactly, nothing left over.
-    if (remainingSizeAfterAllocation == 0){
+    if (remainingSizeAfterAllocation == 0)
+    {
         return MM_TRUE;
     }
     // case 2 : hard internal fragmentation. leftover cannot hold a meta block plus
     // one whole struct, so it could never serve a future request from this family.
     // absorbed into the allocated block instead of being tracked. no new block, so
     // no linkage or priority-queue changes are needed.
-    else if(remainingSizeAfterAllocation < (sizeof(block_meta_data_t) + pg_family->struct_size)){
+    else if (remainingSizeAfterAllocation < (sizeof(block_meta_data_t) + pg_family->struct_size))
+    {
         return MM_TRUE;
     }
-    
+
     // case 3 : full split. the residual is guaranteed to hold at least one whole
     // struct, because anything smaller was already caught by the hard-IF check above.
     // note: the course's looser threshold (remaining < sizeof(block_meta_data_t)) also
@@ -305,9 +308,9 @@ block_meta_data_t *mm_allocate_free_data_block(page_family_t *pg_family, __uint3
     {
         // New Page
         new_page = mm_add_new_page_to_family(pg_family);
-        if(!new_page)
+        if (!new_page)
             return NULL;
-            
+
         status = mm_split_free_data_block_for_allocation(pg_family, &new_page->meta_block, requested_size);
         if (status)
         {
@@ -316,7 +319,7 @@ block_meta_data_t *mm_allocate_free_data_block(page_family_t *pg_family, __uint3
         return NULL;
     }
     status = mm_split_free_data_block_for_allocation(pg_family, biggestFreeBlock, requested_size);
-    if(status)
+    if (status)
         return biggestFreeBlock;
 
     return NULL;
@@ -466,12 +469,67 @@ void mm_print_block_usage()
     }
 }
 
-
-static int getHardInternalFragmentedMemSize(block_meta_data_t *first, block_meta_data_t* second){
+static int getHardInternalFragmentedMemSize(block_meta_data_t *first, block_meta_data_t *second)
+{
     // return ((unsigned long)second - (unsigned long)first - first->data_block_size - sizeof(block_meta_data_t));
-    block_meta_data_t* nextBlockBySize = NEXT_META_BLOCK_BY_SIZE(first);
+    block_meta_data_t *nextBlockBySize = NEXT_META_BLOCK_BY_SIZE(first);
     return (int)((unsigned long)second - (unsigned long)nextBlockBySize);
 }
+
+block_meta_data_t* freeBlock(block_meta_data_t *metaBlockToBeFreed)
+{
+
+    block_meta_data_t *blockTobeReturned = NULL;
+    assert(metaBlockToBeFreed->is_free == MM_FALSE);
+
+    vm_page_t *hostingPage = MM_GET_PAGE_FROM_META_BLOCK(metaBlockToBeFreed);
+    page_family_t *pgFamily = hostingPage->pg_family;
+
+    metaBlockToBeFreed->is_free = MM_TRUE;
+    blockTobeReturned = metaBlockToBeFreed;
+    block_meta_data_t *nextMetaBlock = NEXT_META_BLOCK(metaBlockToBeFreed);
+
+    if (nextMetaBlock == NULL) // [last meta block on the page]
+    {
+        metaBlockToBeFreed->data_block_size += getHardInternalFragmentedMemSize(metaBlockToBeFreed, (block_meta_data_t *)((char *)hostingPage + SYSTEM_PAGE_SIZE));
+    }
+    else
+    {
+        metaBlockToBeFreed->data_block_size += getHardInternalFragmentedMemSize(metaBlockToBeFreed, nextMetaBlock);
+    }
+
+    // now we handled the cases of fragmentation -- so now we just have to merge our empty meta-block with the blocks above or below
+    // 1] if merging possible with block above.
+    if(nextMetaBlock && nextMetaBlock->is_free == MM_TRUE){
+        mm_union_free_blocks(metaBlockToBeFreed, nextMetaBlock);
+        blockTobeReturned = metaBlockToBeFreed;
+    }
+
+    // 2] if merging possible with block below.
+    block_meta_data_t* prevBlock = PREV_META_BLOCK(metaBlockToBeFreed);
+    if(prevBlock && prevBlock->is_free == MM_TRUE){
+        mm_union_free_blocks(prevBlock, metaBlockToBeFreed);
+        blockTobeReturned = prevBlock;
+    }
+
+    // now at this stage it is possible that virtual data memory page is empty.
+    if(mm_is_vm_page_empty(hostingPage)){
+        mm_vm_page_delete_and_free(hostingPage);
+        return NULL;
+    }
+
+    mm_add_free_block_meta_data_to_free_block_list(pgFamily, blockTobeReturned);
+    return blockTobeReturned;
+}
+
+void xfree(void *dataAddress)
+{
+    block_meta_data_t *linkedMetaBlock = (block_meta_data_t *)((char *)dataAddress - sizeof(block_meta_data_t));
+    assert(linkedMetaBlock->is_free == MM_FALSE); // Error if already free(MM_TRUE)
+
+    freeBlock(linkedMetaBlock); // main function -> does the major work of handling HARD-INTERNAL_FRAGMENTATION
+}
+
 
 // int main()
 // {

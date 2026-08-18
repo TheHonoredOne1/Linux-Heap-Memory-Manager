@@ -18,6 +18,9 @@ void mm_print_registered_page_families();
 void * xcalloc(char* struct_name, int units);
 #define XCALLOC(units, struct_name)(xcalloc(#struct_name, units))
 
+void xfree(void* dataAddress);
+#define XFREE(ptr)(xfree(ptr))
+
 /* printing / diagnostics */
 void mm_print_memory_usage(char *struct_name);
 void mm_print_block_usage();
